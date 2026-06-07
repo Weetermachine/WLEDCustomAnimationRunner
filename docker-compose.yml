@@ -1,0 +1,15 @@
+services:
+  wled-runner:
+    build: .
+    container_name: wled-runner
+    restart: unless-stopped
+    ports:
+      - "8093:8093"
+    environment:
+      - TZ=America/Denver
+      - DB_PATH=/data/wled.db
+    volumes:
+      - wled_data:/data
+
+volumes:
+  wled_data:

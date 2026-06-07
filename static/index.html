@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WLED Flag Shimmer</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #171c24;
+    --panel-2: #1f2632;
+    --border: #2a3340;
+    --text: #e6e9ef;
+    --muted: #8b95a5;
+    --accent: #4f8cff;
+    --red: #e5484d;
+    --green: #30a46c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  header {
+    padding: 20px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .flag { font-size: 22px; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .card h2 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .spread { justify-content: space-between; }
+  .status-line { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+  .status-line .label { color: var(--muted); min-width: 130px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.off { background: var(--red); }
+  button {
+    font: inherit; border: 1px solid var(--border); background: var(--panel-2);
+    color: var(--text); padding: 9px 16px; border-radius: 8px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--green); border-color: var(--green); color: #fff; }
+  button.danger { background: var(--red); border-color: var(--red); color: #fff; }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  input, select {
+    font: inherit; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  }
+  input[type=range] { padding: 0; }
+  label.field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .pill.on { color: var(--green); border-color: var(--green); }
+  .pill.off { color: var(--muted); }
+  .days { display: flex; gap: 6px; flex-wrap: wrap; }
+  .day-btn { padding: 6px 10px; border-radius: 8px; cursor: pointer; user-select: none;
+    border: 1px solid var(--border); background: var(--bg); font-size: 13px; }
+  .day-btn.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 12px; padding: 0; width: min(520px, 92vw);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  .dlg-body { padding: 20px; display: grid; gap: 14px; }
+  .dlg-head { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  .dlg-foot { padding: 16px 20px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .val { color: var(--text); font-variant-numeric: tabular-nums; }
+  .hidden { display: none !important; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border); padding: 10px 16px;
+    border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <span class="flag">🇺🇸</span>
+  <h1>WLED Flag Shimmer</h1>
+</header>
+
+<main>
+  <!-- Status -->
+  <section class="card">
+    <h2>Status</h2>
+    <div class="status-line">
+      <span class="label">State</span>
+      <span><span id="state-dot" class="dot off"></span> <span id="state-text" class="val">…</span></span>
+    </div>
+    <div class="status-line">
+      <span class="label">Active schedule</span>
+      <span id="active-sched" class="val">—</span>
+    </div>
+    <div class="status-line">
+      <span class="label">Next event</span>
+      <span id="next-event" class="val">—</span>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button id="btn-start" class="primary">Start animation</button>
+      <button id="btn-stop" class="danger">Stop animation</button>
+    </div>
+  </section>
+
+  <!-- Schedules -->
+  <section class="card">
+    <div class="row spread">
+      <h2 style="margin:0">Schedules</h2>
+      <button id="btn-add" class="small">+ Add schedule</button>
+    </div>
+    <table style="margin-top:14px">
+      <thead>
+        <tr><th>Name</th><th>Start</th><th>End</th><th>When</th><th></th><th></th></tr>
+      </thead>
+      <tbody id="sched-rows"></tbody>
+    </table>
+    <p id="no-sched" class="muted hidden">No schedules yet.</p>
+  </section>
+
+  <!-- Settings -->
+  <section class="card">
+    <h2>Settings</h2>
+    <div class="grid2">
+      <label class="field">WLED IP address
+        <input id="set-ip" type="text" placeholder="192.168.50.250" />
+      </label>
+      <label class="field">Latitude
+        <input id="set-lat" type="number" step="0.0001" />
+      </label>
+      <label class="field">Longitude
+        <input id="set-lon" type="number" step="0.0001" />
+      </label>
+      <label class="field">Speed multiplier · <span id="speed-val" class="val"></span>×
+        <input id="set-speed" type="range" min="0.5" max="3" step="0.1" />
+      </label>
+      <label class="field">Master brightness · <span id="bright-val" class="val"></span>
+        <input id="set-bright" type="range" min="0" max="255" step="1" />
+      </label>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button id="btn-save-settings" class="primary">Save settings</button>
+    </div>
+  </section>
+</main>
+
+<!-- Schedule editor -->
+<dialog id="sched-dialog">
+  <form method="dialog">
+    <div class="dlg-head" id="dlg-title">Add schedule</div>
+    <div class="dlg-body">
+      <input type="hidden" id="f-id" />
+      <label class="field">Name
+        <input id="f-name" type="text" placeholder="Evening shimmer" required />
+      </label>
+      <div class="grid2">
+        <label class="field">Start type
+          <select id="f-start-type">
+            <option value="clock">Clock time</option>
+            <option value="sunset">Sunset</option>
+          </select>
+        </label>
+        <label class="field" id="f-clock-wrap">Start time
+          <input id="f-start-time" type="time" />
+        </label>
+        <label class="field hidden" id="f-sunset-wrap">Sunset offset (min, − = before)
+          <input id="f-sunset-offset" type="number" step="1" value="0" />
+        </label>
+        <label class="field">End time
+          <input id="f-end-time" type="time" required />
+        </label>
+      </div>
+      <div class="field">Days of week
+        <div class="days" id="f-days"></div>
+      </div>
+      <label class="field">Specific dates (comma-separated YYYY-MM-DD)
+        <input id="f-dates" type="text" placeholder="2026-07-04, 2026-12-25" />
+      </label>
+      <label class="row" style="gap:8px">
+        <input id="f-enabled" type="checkbox" checked /> <span>Enabled</span>
+      </label>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="dlg-cancel">Cancel</button>
+      <button type="button" id="dlg-save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const DAY_NAMES = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+async function api(path, opts) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { msg = (await res.json()).detail || msg; } catch {}
+    throw new Error(msg);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+// ---- status ----
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status");
+    const on = s.running;
+    $("#state-dot").className = "dot " + (on ? "on" : "off");
+    $("#state-text").textContent = on ? "Running" : "Stopped";
+    $("#active-sched").textContent = s.active_schedule || "—";
+    $("#next-event").textContent = s.next_event
+      ? `${s.next_event.type === "start" ? "starts" : "ends"} ${s.next_event.name} @ ${s.next_event.at}`
+      : "none scheduled";
+  } catch (e) { /* keep last known */ }
+}
+
+$("#btn-start").onclick = async () => { await api("/api/start", { method: "POST" }); refreshStatus(); toast("Animation started"); };
+$("#btn-stop").onclick  = async () => { await api("/api/stop",  { method: "POST" }); refreshStatus(); toast("Animation stopped"); };
+
+// ---- settings ----
+async function loadSettings() {
+  const s = await api("/api/settings");
+  $("#set-ip").value = s.wled_ip;
+  $("#set-lat").value = s.latitude;
+  $("#set-lon").value = s.longitude;
+  $("#set-speed").value = s.speed;
+  $("#speed-val").textContent = (+s.speed).toFixed(1);
+  $("#set-bright").value = s.master_brightness;
+  $("#bright-val").textContent = s.master_brightness;
+}
+$("#set-speed").oninput  = (e) => $("#speed-val").textContent = (+e.target.value).toFixed(1);
+$("#set-bright").oninput = (e) => $("#bright-val").textContent = e.target.value;
+$("#btn-save-settings").onclick = async () => {
+  await api("/api/settings", { method: "POST", body: JSON.stringify({
+    wled_ip: $("#set-ip").value.trim(),
+    latitude: parseFloat($("#set-lat").value),
+    longitude: parseFloat($("#set-lon").value),
+    speed: parseFloat($("#set-speed").value),
+    master_brightness: parseInt($("#set-bright").value, 10),
+  })});
+  toast("Settings saved");
+  refreshStatus();
+};
+
+// ---- schedules ----
+function whenText(s) {
+  const days = s.days.map((d) => DAY_NAMES[d]).join(" ");
+  const dates = s.dates.join(", ");
+  return [days, dates].filter(Boolean).join(" · ") || "—";
+}
+function startText(s) {
+  if (s.start_type === "sunset") {
+    const o = s.sunset_offset;
+    return "sunset" + (o ? (o > 0 ? `+${o}` : `${o}`) : "");
+  }
+  return s.start_time || "—";
+}
+
+async function loadSchedules() {
+  const rows = await api("/api/schedules");
+  const tb = $("#sched-rows");
+  tb.innerHTML = "";
+  $("#no-sched").classList.toggle("hidden", rows.length > 0);
+  for (const s of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(s.name)}</td>
+      <td>${esc(startText(s))}</td>
+      <td>${esc(s.end_time)}</td>
+      <td>${esc(whenText(s))}</td>
+      <td><span class="pill ${s.enabled ? "on" : "off"}">${s.enabled ? "on" : "off"}</span></td>
+      <td class="row" style="gap:6px;border:none">
+        <button class="small" data-act="toggle">${s.enabled ? "Disable" : "Enable"}</button>
+        <button class="small" data-act="edit">Edit</button>
+        <button class="small" data-act="del">Delete</button>
+      </td>`;
+    tr.querySelector('[data-act=toggle]').onclick = async () => { await api(`/api/schedules/${s.id}/toggle`, { method: "POST" }); loadSchedules(); refreshStatus(); };
+    tr.querySelector('[data-act=edit]').onclick   = () => openDialog(s);
+    tr.querySelector('[data-act=del]').onclick    = async () => { if (confirm(`Delete "${s.name}"?`)) { await api(`/api/schedules/${s.id}`, { method: "DELETE" }); loadSchedules(); refreshStatus(); } };
+    tb.appendChild(tr);
+  }
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+
+// ---- dialog ----
+const dlg = $("#sched-dialog");
+function buildDayButtons() {
+  const wrap = $("#f-days");
+  wrap.innerHTML = "";
+  DAY_NAMES.forEach((n, i) => {
+    const b = document.createElement("div");
+    b.className = "day-btn"; b.textContent = n; b.dataset.day = i;
+    b.onclick = () => b.classList.toggle("sel");
+    wrap.appendChild(b);
+  });
+}
+function syncStartType() {
+  const sunset = $("#f-start-type").value === "sunset";
+  $("#f-sunset-wrap").classList.toggle("hidden", !sunset);
+  $("#f-clock-wrap").classList.toggle("hidden", sunset);
+}
+$("#f-start-type").onchange = syncStartType;
+
+function openDialog(s) {
+  buildDayButtons();
+  $("#dlg-title").textContent = s ? "Edit schedule" : "Add schedule";
+  $("#f-id").value = s ? s.id : "";
+  $("#f-name").value = s ? s.name : "";
+  $("#f-start-type").value = s ? s.start_type : "clock";
+  $("#f-start-time").value = s && s.start_time ? s.start_time : "20:00";
+  $("#f-sunset-offset").value = s ? s.sunset_offset : 0;
+  $("#f-end-time").value = s ? s.end_time : "23:00";
+  $("#f-dates").value = s ? s.dates.join(", ") : "";
+  $("#f-enabled").checked = s ? s.enabled : true;
+  const sel = new Set(s ? s.days : []);
+  $("#f-days").querySelectorAll(".day-btn").forEach((b) => {
+    if (sel.has(+b.dataset.day)) b.classList.add("sel");
+  });
+  syncStartType();
+  dlg.showModal();
+}
+$("#btn-add").onclick = () => openDialog(null);
+$("#dlg-cancel").onclick = () => dlg.close();
+
+$("#dlg-save").onclick = async () => {
+  const days = [...$("#f-days").querySelectorAll(".day-btn.sel")].map((b) => +b.dataset.day);
+  const dates = $("#f-dates").value.split(",").map((d) => d.trim()).filter(Boolean);
+  const startType = $("#f-start-type").value;
+  const payload = {
+    name: $("#f-name").value.trim(),
+    start_type: startType,
+    start_time: startType === "clock" ? $("#f-start-time").value : null,
+    sunset_offset: parseInt($("#f-sunset-offset").value || "0", 10),
+    end_time: $("#f-end-time").value,
+    days, dates,
+    enabled: $("#f-enabled").checked,
+  };
+  if (!payload.name) return toast("Name is required");
+  if (!payload.end_time) return toast("End time is required");
+  if (!days.length && !dates.length) return toast("Pick at least one day or date");
+  const id = $("#f-id").value;
+  try {
+    await api(id ? `/api/schedules/${id}` : "/api/schedules", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+    dlg.close();
+    loadSchedules();
+    refreshStatus();
+    toast("Schedule saved");
+  } catch (e) { toast(e.message); }
+};
+
+// ---- init ----
+loadSettings();
+loadSchedules();
+refreshStatus();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>
