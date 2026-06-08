@@ -35,6 +35,22 @@ def init_db():
                 value TEXT NOT NULL
             )"""
         )
+        # Credentials live in their own table so they never leak through the
+        # settings API. Single-user: one row, id = 1.
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS auth (
+                id    INTEGER PRIMARY KEY CHECK (id = 1),
+                email TEXT NOT NULL,
+                salt  TEXT NOT NULL,
+                hash  TEXT NOT NULL
+            )"""
+        )
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS sessions (
+                token      TEXT PRIMARY KEY,
+                expires_at REAL NOT NULL
+            )"""
+        )
         c.execute(
             """CREATE TABLE IF NOT EXISTS schedules (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +97,78 @@ def update_settings(updates):
             )
         conn.commit()
         conn.close()
+
+
+# ---- auth + sessions ------------------------------------------------------
+
+def get_auth():
+    with _lock:
+        conn = get_conn()
+        r = conn.execute("SELECT email, salt, hash FROM auth WHERE id = 1").fetchone()
+        conn.close()
+    if not r:
+        return None
+    return {"email": r["email"], "salt": r["salt"], "hash": r["hash"]}
+
+
+def set_auth(email, salt, hash_):
+    with _lock:
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO auth(id, email, salt, hash) VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET email = excluded.email, "
+            "salt = excluded.salt, hash = excluded.hash",
+            (email, salt, hash_),
+        )
+        conn.commit()
+        conn.close()
+
+
+def clear_auth():
+    """Wipe credentials and all sessions (used by the password-reset script)."""
+    with _lock:
+        conn = get_conn()
+        conn.execute("DELETE FROM auth")
+        conn.execute("DELETE FROM sessions")
+        conn.commit()
+        conn.close()
+
+
+def create_session(token, expires_at):
+    with _lock:
+        conn = get_conn()
+        conn.execute("DELETE FROM sessions WHERE expires_at < ?", (_now(),))
+        conn.execute(
+            "INSERT INTO sessions(token, expires_at) VALUES (?, ?)", (token, expires_at)
+        )
+        conn.commit()
+        conn.close()
+
+
+def session_valid(token):
+    if not token:
+        return False
+    with _lock:
+        conn = get_conn()
+        r = conn.execute(
+            "SELECT expires_at FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        conn.close()
+    return bool(r) and r["expires_at"] >= _now()
+
+
+def delete_session(token):
+    with _lock:
+        conn = get_conn()
+        conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        conn.commit()
+        conn.close()
+
+
+def _now():
+    import time
+
+    return time.time()
 
 
 # ---- schedules ------------------------------------------------------------

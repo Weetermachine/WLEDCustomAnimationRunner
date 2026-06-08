@@ -44,6 +44,30 @@ minutes), a clock end time, active weekdays and/or specific calendar dates, and
 an enable toggle. Manual start/stop is always available and is not fought by the
 scheduler minute-to-minute.
 
+## Authentication
+
+The whole app sits behind a single-user login. The plaintext password is never
+stored — only a salted **PBKDF2-HMAC-SHA256** hash in the SQLite volume (in a
+separate `auth` table that the settings API never exposes).
+
+- **First run:** open the UI and you'll get a *Create your password* screen for
+  `christopher.weeter@gmail.com` (override with the `ADMIN_EMAIL` env var).
+- **Sessions:** login sets an HttpOnly cookie backed by a server-side session
+  token (30-day TTL, revocable on logout).
+- **Change password:** in the app's *Account* card.
+- **Forgot password** (needs shell access to the box):
+
+  ```sh
+  docker compose exec wled-runner python reset_password.py
+  ```
+
+  This clears the stored hash so the first-run *Create your password* screen
+  reappears.
+
+> Sessions use `SameSite=Lax`, HttpOnly cookies without the `Secure` flag so they
+> work over plain HTTP on the LAN. If you put this behind an HTTPS reverse proxy,
+> consider enabling `Secure`.
+
 ## Deploy (TrueNAS SCALE via shell)
 
 ```sh

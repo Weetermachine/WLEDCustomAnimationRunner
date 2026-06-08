@@ -82,12 +82,53 @@
     background: var(--panel-2); border: 1px solid var(--border); padding: 10px 16px;
     border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
+  #gate { position: fixed; inset: 0; background: var(--bg); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .gate-card { width: min(380px, 92vw); }
+  .gate-card .flag { font-size: 30px; display: block; text-align: center; margin-bottom: 6px; }
+  .gate-card h2 { text-align: center; color: var(--text); text-transform: none;
+    letter-spacing: 0; font-size: 18px; }
+  .gate-card .muted { text-align: center; margin-top: -8px; margin-bottom: 18px; }
+  .gate-card form { display: grid; gap: 12px; }
+  .gate-err { color: var(--red); font-size: 13px; min-height: 18px; text-align: center; }
+  .linkbtn { background: none; border: none; color: var(--accent); cursor: pointer;
+    padding: 0; font-size: 13px; }
 </style>
 </head>
 <body>
+<!-- Auth gate (login / first-run setup) -->
+<div id="gate">
+  <div class="card gate-card">
+    <span class="flag">🇺🇸</span>
+    <!-- Setup (first run) -->
+    <div id="gate-setup" class="hidden">
+      <h2>Create your password</h2>
+      <p class="muted">First-time setup for <span id="setup-email"></span></p>
+      <form id="setup-form">
+        <input id="setup-pw" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password" />
+        <input id="setup-pw2" type="password" placeholder="Confirm password" autocomplete="new-password" />
+        <div id="setup-err" class="gate-err"></div>
+        <button class="primary" type="submit">Create password &amp; sign in</button>
+      </form>
+    </div>
+    <!-- Login -->
+    <div id="gate-login" class="hidden">
+      <h2>Sign in</h2>
+      <p class="muted">WLED Flag Shimmer</p>
+      <form id="login-form">
+        <input id="login-email" type="email" placeholder="Email" autocomplete="username" />
+        <input id="login-pw" type="password" placeholder="Password" autocomplete="current-password" />
+        <div id="login-err" class="gate-err"></div>
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <header>
   <span class="flag">🇺🇸</span>
   <h1>WLED Flag Shimmer</h1>
+  <button id="btn-logout" class="small" style="margin-left:auto">Log out</button>
 </header>
 
 <main>
@@ -151,6 +192,22 @@
       <button id="btn-save-settings" class="primary">Save settings</button>
     </div>
   </section>
+
+  <!-- Account -->
+  <section class="card">
+    <h2>Account</h2>
+    <div class="grid2">
+      <label class="field">Current password
+        <input id="cp-current" type="password" autocomplete="current-password" />
+      </label>
+      <label class="field">New password (min 8 chars)
+        <input id="cp-new" type="password" autocomplete="new-password" />
+      </label>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button id="btn-change-pw">Change password</button>
+    </div>
+  </section>
 </main>
 
 <!-- Schedule editor -->
@@ -207,6 +264,10 @@ async function api(path, opts) {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
+  if (res.status === 401) {
+    showGate();           // session expired or missing -> back to login
+    throw new Error("Not authenticated");
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).detail || msg; } catch {}
@@ -373,11 +434,79 @@ $("#dlg-save").onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 
+// ---- auth gate ----
+let statusTimer = null;
+
+function showGate() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  $("#gate").style.display = "flex";
+}
+function hideGate() { $("#gate").style.display = "none"; }
+
+async function enterApp() {
+  hideGate();
+  await Promise.all([loadSettings(), loadSchedules(), refreshStatus()]);
+  if (!statusTimer) statusTimer = setInterval(refreshStatus, 5000);
+}
+
+async function checkAuth() {
+  const a = await (await fetch("/api/auth/status")).json();
+  $("#setup-email").textContent = a.email;
+  $("#login-email").value = a.email;
+  if (a.authenticated) { enterApp(); return; }
+  // not authed -> show the right gate panel
+  $("#gate-setup").classList.toggle("hidden", a.configured);
+  $("#gate-login").classList.toggle("hidden", !a.configured);
+  showGate();
+}
+
+$("#setup-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const pw = $("#setup-pw").value, pw2 = $("#setup-pw2").value;
+  const err = $("#setup-err");
+  if (pw.length < 8) return (err.textContent = "Password must be at least 8 characters");
+  if (pw !== pw2) return (err.textContent = "Passwords don't match");
+  try {
+    await api("/api/auth/setup", { method: "POST", body: JSON.stringify({ password: pw }) });
+    err.textContent = "";
+    enterApp();
+  } catch (ex) { err.textContent = ex.message; }
+};
+
+$("#login-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const err = $("#login-err");
+  try {
+    await api("/api/auth/login", { method: "POST", body: JSON.stringify({
+      email: $("#login-email").value.trim(),
+      password: $("#login-pw").value,
+    })});
+    $("#login-pw").value = "";
+    err.textContent = "";
+    enterApp();
+  } catch (ex) { err.textContent = "Invalid email or password"; }
+};
+
+$("#btn-logout").onclick = async () => {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch {}
+  showGate();
+  checkAuth();
+};
+
+$("#btn-change-pw").onclick = async () => {
+  const cur = $("#cp-current").value, nw = $("#cp-new").value;
+  if (nw.length < 8) return toast("New password must be at least 8 characters");
+  try {
+    await api("/api/auth/change-password", { method: "POST", body: JSON.stringify({
+      current_password: cur, new_password: nw,
+    })});
+    $("#cp-current").value = ""; $("#cp-new").value = "";
+    toast("Password changed");
+  } catch (ex) { toast(ex.message); }
+};
+
 // ---- init ----
-loadSettings();
-loadSchedules();
-refreshStatus();
-setInterval(refreshStatus, 5000);
+checkAuth();
 </script>
 </body>
 </html>
