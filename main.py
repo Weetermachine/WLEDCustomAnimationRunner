@@ -49,6 +49,7 @@ def _set_session_cookie(response: Response):
         value=token,
         httponly=True,
         samesite="lax",
+        secure=auth.COOKIE_SECURE,
         max_age=auth.SESSION_TTL,
         path="/",
     )

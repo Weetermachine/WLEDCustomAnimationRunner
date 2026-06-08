@@ -64,9 +64,11 @@ separate `auth` table that the settings API never exposes).
   This clears the stored hash so the first-run *Create your password* screen
   reappears.
 
-> Sessions use `SameSite=Lax`, HttpOnly cookies without the `Secure` flag so they
-> work over plain HTTP on the LAN. If you put this behind an HTTPS reverse proxy,
-> consider enabling `Secure`.
+> Sessions use HttpOnly, `SameSite=Lax`, **`Secure`** cookies (the app is served
+> behind an HTTPS reverse proxy). Uvicorn runs with `--proxy-headers` so it
+> honors `X-Forwarded-Proto`. If you ever expose it over plain HTTP on the LAN,
+> set `COOKIE_SECURE=0` — otherwise the browser will refuse to send the cookie
+> and you won't be able to stay logged in.
 
 ## Deploy (TrueNAS SCALE via shell)
 

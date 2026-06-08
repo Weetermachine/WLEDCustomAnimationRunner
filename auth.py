@@ -6,12 +6,16 @@ stored server-side so they can be revoked.
 """
 import hashlib
 import hmac
+import os
 import secrets
 import time
 
 ITERATIONS = 200_000
 SESSION_TTL = 30 * 24 * 3600  # 30 days
 COOKIE_NAME = "wled_session"
+# Served behind an HTTPS reverse proxy by default. Set COOKIE_SECURE=0 if you
+# ever expose the app over plain HTTP on the LAN.
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1") not in ("0", "false", "False", "")
 
 
 def hash_password(password, salt=None):
