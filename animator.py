@@ -1,12 +1,19 @@
-"""Flag Shimmer animation + DDP transport for a 1378-LED WLED strip.
+"""DDP transport + animation runner for a 1378-LED WLED strip.
 
-When the animation stops we simply stop sending DDP packets; WLED falls back
-to its own playlist after its DDP timeout (~2500 ms).
+This module owns the network transport (DDP over UDP), the 30 FPS pacing, and
+the background thread lifecycle. The actual per-frame pixels come from a
+pluggable animation looked up in the `animations` registry, so adding effects
+never touches this file.
+
+When the animation stops we simply stop sending DDP packets; WLED falls back to
+its own playlist after its DDP timeout (~2500 ms).
 """
 import socket
 import threading
 import time
 
+import animations
+from animations import AnimationContext
 from strip_colors import stripColors
 
 DDP_PORT = 4048
@@ -17,17 +24,6 @@ MAX_PAYLOAD = MAX_PIXELS_PER_PACKET * 3
 
 NUM_LEDS = len(stripColors)
 TARGET_FPS = 30.0
-
-
-def _build_bright_seq():
-    """11 brightness levels, ping-ponging 0 -> 10 -> 0."""
-    step = 256 // 13  # 19
-    levels = [i * step for i in range(11)]          # 0 .. 190  (11 values)
-    return levels + levels[-2:0:-1]                 # ping-pong, 20 values
-
-
-BRIGHT_SEQ = _build_bright_seq()
-SEQ_LEN = len(BRIGHT_SEQ)
 
 
 class Animator:
@@ -42,9 +38,10 @@ class Animator:
         self.wled_ip = "192.168.50.250"
         self.speed = 1.0
         self.master_brightness = 255
+        self.animation_key = animations.default_key()
 
     # -- settings ----------------------------------------------------------
-    def update_settings(self, wled_ip=None, speed=None, master_brightness=None):
+    def update_settings(self, wled_ip=None, speed=None, master_brightness=None, animation=None):
         with self._lock:
             if wled_ip is not None:
                 self.wled_ip = wled_ip
@@ -52,6 +49,8 @@ class Animator:
                 self.speed = max(0.5, min(3.0, float(speed)))
             if master_brightness is not None:
                 self.master_brightness = max(0, min(255, int(master_brightness)))
+            if animation is not None and animations.get(animation) is not None:
+                self.animation_key = animation
 
     def is_running(self):
         return self._running
@@ -102,41 +101,48 @@ class Animator:
     def _run(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         frame_time = 1.0 / TARGET_FPS
-        counter = 0.0
+        ctx = AnimationContext(NUM_LEDS, stripColors)
         next_t = time.monotonic()
+
+        current_key = None
+        spec = None
+        gen = None
+        frame = 0
+        blank = bytes(NUM_LEDS * 3)
+
         try:
             while not self._stop.is_set():
                 with self._lock:
-                    speed = self.speed
-                    mb = self.master_brightness
+                    ctx.speed = self.speed
+                    ctx.brightness = self.master_brightness
                     ip = self.wled_ip
+                    key = self.animation_key
 
-                ci = int(counter)
-                buf = bytearray(NUM_LEDS * 3)
-                for i in range(NUM_LEDS):
-                    b = BRIGHT_SEQ[(i + ci) % SEQ_LEN]
-                    if mb != 255:
-                        b = b * mb // 255
-                    color = stripColors[i]
-                    o = i * 3
-                    if color == "RED":
-                        buf[o] = b
-                    elif color == "WHITE":
-                        buf[o] = b
-                        buf[o + 1] = b
-                        buf[o + 2] = b
-                    else:  # BLUE
-                        buf[o + 2] = b
+                # (Re)resolve the animation when the selection changes.
+                if key != current_key:
+                    spec = animations.get(key) or animations.get(animations.default_key())
+                    current_key = key
+                    frame = 0
+                    gen = spec.fn(ctx) if spec and spec.kind == "generator" else None
 
-                self._send_frame(sock, bytes(buf), ip)
+                if spec is None:
+                    buf = blank
+                elif spec.kind == "generator":
+                    try:
+                        buf = next(gen)
+                    except StopIteration:
+                        buf = blank
+                else:  # stateless frame function
+                    buf = spec.fn(frame, NUM_LEDS, ctx)
 
-                counter += speed
+                self._send_frame(sock, buf, ip)
+                frame += 1
+
                 next_t += frame_time
                 sleep = next_t - time.monotonic()
                 if sleep > 0:
                     self._stop.wait(sleep)
                 else:
-                    # we fell behind; resync the clock
                     next_t = time.monotonic()
         finally:
             sock.close()

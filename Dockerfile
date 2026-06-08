@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py animator.py scheduler.py database.py auth.py strip_colors.py reset_password.py ./
+COPY animations ./animations
 COPY static ./static
 
 EXPOSE 8093

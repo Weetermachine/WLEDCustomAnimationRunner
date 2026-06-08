@@ -14,12 +14,52 @@ its own playlist automatically after its DDP timeout (~2500 ms).
 - **Plain HTML/JS** dark-theme frontend (`static/index.html`)
 - Single `Dockerfile` + `docker-compose.yml`, exposed on **port 8093**
 
-## The animation — Flag Shimmer
+## Animations
 
+Animations are pluggable. The `animator.py` loop owns the DDP transport and
+30 FPS pacing; the per-frame pixels come from whichever animation is selected in
+the Settings panel (persisted as the `animation` setting). The strip's
 `strip_colors.py` holds `stripColors`, a 1378-element list of `'RED'`,
-`'WHITE'`, `'BLUE'`. A brightness wave (11 levels, ping-ponging 0→10→0) scrolls
-across the strip at 30 FPS. Colors are `RED=(b,0,0)`, `WHITE=(b,b,b)`,
-`BLUE=(0,0,b)`, scaled by master brightness.
+`'WHITE'`, `'BLUE'`, handed to animations as `ctx.colors`.
+
+Ships with:
+
+- **Flag Shimmer** (`animations/flag_shimmer.py`) — the original effect; a
+  brightness wave (11 levels, ping-ponging 0→10→0) scrolls across the
+  RED/WHITE/BLUE map. Written as a *generator* so its scroll phase accumulates
+  smoothly even as speed changes.
+- **Rainbow Scroll** (`animations/rainbow.py`) — a moving hue gradient, written
+  as a *stateless frame function*.
+
+### Adding an animation
+
+Drop a module in `animations/` and decorate a function with `@animation(key,
+label)`. Two styles, auto-detected:
+
+```python
+from animations import animation
+
+# Stateless: pure function of the frame index. Easy to write/test.
+@animation("my_fx", "My Effect")
+def my_fx(frame, n_leds, ctx):
+    buf = bytearray(n_leds * 3)
+    ...                      # ctx.speed, ctx.brightness, ctx.colors are live
+    return bytes(buf)
+
+# Stateful: a generator (note `yield`). Good for effects that carry state.
+@animation("my_gen", "My Generator")
+def my_gen(ctx):
+    while True:
+        buf = bytearray(ctx.n_leds * 3)
+        ...
+        yield bytes(buf)
+```
+
+Return/yield a `bytes` buffer of length `n_leds * 3` (RGB). `ctx.speed` (0.5–3)
+and `ctx.brightness` (0–255) are updated every frame — read them inside the loop
+to respond to settings and schedule changes. Rebuild the image (`redeploy-wled`)
+and the new animation appears in the dropdown automatically; pass `default=True`
+to make one the default.
 
 > The `strip_colors.py` in this repo is a **placeholder** that generates a
 > runnable banded pattern. Replace it with the real 1378-element map.

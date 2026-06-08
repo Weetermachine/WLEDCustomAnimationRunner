@@ -113,6 +113,7 @@ class ScheduleManager:
             wled_ip=settings["wled_ip"],
             speed=settings["speed"],
             master_brightness=settings["master_brightness"],
+            animation=settings.get("animation"),
         )
 
         now = datetime.datetime.now(tz).replace(microsecond=0)

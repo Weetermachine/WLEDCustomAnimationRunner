@@ -172,6 +172,9 @@
   <section class="card">
     <h2>Settings</h2>
     <div class="grid2">
+      <label class="field">Animation
+        <select id="set-animation"></select>
+      </label>
       <label class="field">WLED IP address
         <input id="set-ip" type="text" placeholder="192.168.50.250" />
       </label>
@@ -315,8 +318,22 @@ $("#btn-start").onclick = async () => { await api("/api/start", { method: "POST"
 $("#btn-stop").onclick  = async () => { await api("/api/stop",  { method: "POST" }); refreshStatus(); toast("Animation stopped"); };
 
 // ---- settings ----
+async function loadAnimations(selected) {
+  const list = await api("/api/animations");
+  const sel = $("#set-animation");
+  sel.innerHTML = "";
+  for (const a of list) {
+    const opt = document.createElement("option");
+    opt.value = a.key;
+    opt.textContent = a.label;
+    sel.appendChild(opt);
+  }
+  sel.value = selected || (list.find((a) => a.default) || list[0] || {}).key || "";
+}
+
 async function loadSettings() {
   const s = await api("/api/settings");
+  await loadAnimations(s.animation);
   $("#set-ip").value = s.wled_ip;
   $("#set-lat").value = s.latitude;
   $("#set-lon").value = s.longitude;
@@ -330,6 +347,7 @@ $("#set-speed").oninput  = (e) => $("#speed-val").textContent = (+e.target.value
 $("#set-bright").oninput = (e) => $("#bright-val").textContent = e.target.value;
 $("#btn-save-settings").onclick = async () => {
   await api("/api/settings", { method: "POST", body: JSON.stringify({
+    animation: $("#set-animation").value,
     wled_ip: $("#set-ip").value.trim(),
     latitude: parseFloat($("#set-lat").value),
     longitude: parseFloat($("#set-lon").value),

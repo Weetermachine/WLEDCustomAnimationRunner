@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import animations
 import auth
 import database
 from animator import animator
@@ -23,7 +24,8 @@ async def lifespan(app: FastAPI):
     database.init_db()
     s = database.get_settings()
     animator.update_settings(
-        wled_ip=s["wled_ip"], speed=s["speed"], master_brightness=s["master_brightness"]
+        wled_ip=s["wled_ip"], speed=s["speed"],
+        master_brightness=s["master_brightness"], animation=s.get("animation"),
     )
     schedule_manager.start()
     yield
@@ -138,6 +140,7 @@ class SettingsIn(BaseModel):
     speed: Optional[float] = Field(default=None, ge=0.5, le=3.0)
     master_brightness: Optional[int] = Field(default=None, ge=0, le=255)
     timezone: Optional[str] = None
+    animation: Optional[str] = None
 
 
 class ScheduleIn(BaseModel):
@@ -181,14 +184,22 @@ def get_settings():
     return database.get_settings()
 
 
+@api.get("/api/animations")
+def get_animations():
+    return animations.list_animations()
+
+
 @api.post("/api/settings")
 def set_settings(payload: SettingsIn):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "animation" in updates and animations.get(updates["animation"]) is None:
+        raise HTTPException(400, "unknown animation")
     if updates:
         database.update_settings(updates)
     s = database.get_settings()
     animator.update_settings(
-        wled_ip=s["wled_ip"], speed=s["speed"], master_brightness=s["master_brightness"]
+        wled_ip=s["wled_ip"], speed=s["speed"],
+        master_brightness=s["master_brightness"], animation=s.get("animation"),
     )
     return s
 

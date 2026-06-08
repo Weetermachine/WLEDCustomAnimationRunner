@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "speed": 1.0,            # animation speed multiplier (0.5 - 3.0)
     "master_brightness": 255,  # 0 - 255
     "timezone": "America/Denver",  # IANA tz for schedules + sunset (Mountain)
+    "animation": "flag_shimmer",  # key into the animations registry
 }
 
 
