@@ -181,6 +181,9 @@
       <label class="field">Longitude
         <input id="set-lon" type="number" step="0.0001" />
       </label>
+      <label class="field">Timezone (IANA)
+        <input id="set-tz" type="text" placeholder="America/Denver" />
+      </label>
       <label class="field">Speed multiplier · <span id="speed-val" class="val"></span>×
         <input id="set-speed" type="range" min="0.5" max="3" step="0.1" />
       </label>
@@ -239,6 +242,17 @@
       <div class="field">Days of week
         <div class="days" id="f-days"></div>
       </div>
+      <div class="grid2">
+        <label class="field">Active from (optional)
+          <input id="f-start-date" type="date" />
+        </label>
+        <label class="field">Active until (optional)
+          <input id="f-end-date" type="date" />
+        </label>
+      </div>
+      <p class="muted" style="margin:-6px 0 0">
+        A date range limits the weekdays above to that span. Leave both blank for no limit.
+      </p>
       <label class="field">Specific dates (comma-separated YYYY-MM-DD)
         <input id="f-dates" type="text" placeholder="2026-07-04, 2026-12-25" />
       </label>
@@ -306,6 +320,7 @@ async function loadSettings() {
   $("#set-ip").value = s.wled_ip;
   $("#set-lat").value = s.latitude;
   $("#set-lon").value = s.longitude;
+  $("#set-tz").value = s.timezone || "America/Denver";
   $("#set-speed").value = s.speed;
   $("#speed-val").textContent = (+s.speed).toFixed(1);
   $("#set-bright").value = s.master_brightness;
@@ -318,6 +333,7 @@ $("#btn-save-settings").onclick = async () => {
     wled_ip: $("#set-ip").value.trim(),
     latitude: parseFloat($("#set-lat").value),
     longitude: parseFloat($("#set-lon").value),
+    timezone: $("#set-tz").value.trim() || "America/Denver",
     speed: parseFloat($("#set-speed").value),
     master_brightness: parseInt($("#set-bright").value, 10),
   })});
@@ -329,7 +345,11 @@ $("#btn-save-settings").onclick = async () => {
 function whenText(s) {
   const days = s.days.map((d) => DAY_NAMES[d]).join(" ");
   const dates = s.dates.join(", ");
-  return [days, dates].filter(Boolean).join(" · ") || "—";
+  let range = "";
+  if (s.start_date || s.end_date) {
+    range = `${s.start_date || "…"} → ${s.end_date || "…"}`;
+  }
+  return [days, range, dates].filter(Boolean).join(" · ") || "—";
 }
 function startText(s) {
   if (s.start_type === "sunset") {
@@ -393,6 +413,8 @@ function openDialog(s) {
   $("#f-start-time").value = s && s.start_time ? s.start_time : "20:00";
   $("#f-sunset-offset").value = s ? s.sunset_offset : 0;
   $("#f-end-time").value = s ? s.end_time : "23:00";
+  $("#f-start-date").value = s && s.start_date ? s.start_date : "";
+  $("#f-end-date").value = s && s.end_date ? s.end_date : "";
   $("#f-dates").value = s ? s.dates.join(", ") : "";
   $("#f-enabled").checked = s ? s.enabled : true;
   const sel = new Set(s ? s.days : []);
@@ -409,6 +431,8 @@ $("#dlg-save").onclick = async () => {
   const days = [...$("#f-days").querySelectorAll(".day-btn.sel")].map((b) => +b.dataset.day);
   const dates = $("#f-dates").value.split(",").map((d) => d.trim()).filter(Boolean);
   const startType = $("#f-start-type").value;
+  const startDate = $("#f-start-date").value || null;
+  const endDate = $("#f-end-date").value || null;
   const payload = {
     name: $("#f-name").value.trim(),
     start_type: startType,
@@ -416,11 +440,16 @@ $("#dlg-save").onclick = async () => {
     sunset_offset: parseInt($("#f-sunset-offset").value || "0", 10),
     end_time: $("#f-end-time").value,
     days, dates,
+    start_date: startDate,
+    end_date: endDate,
     enabled: $("#f-enabled").checked,
   };
   if (!payload.name) return toast("Name is required");
   if (!payload.end_time) return toast("End time is required");
-  if (!days.length && !dates.length) return toast("Pick at least one day or date");
+  if (!days.length && !dates.length && !startDate && !endDate)
+    return toast("Pick at least one day, date, or a date range");
+  if (startDate && endDate && endDate < startDate)
+    return toast("End date must be on or after start date");
   const id = $("#f-id").value;
   try {
     await api(id ? `/api/schedules/${id}` : "/api/schedules", {

@@ -34,15 +34,30 @@ number, big-endian byte offset and length. Sent to the WLED IP on UDP port
 
 - WLED IP (default `192.168.50.250`)
 - Latitude / longitude (default Salt Lake City `40.7608, -111.8910`)
+- Timezone (IANA name, default `America/Denver`)
 - Speed multiplier (0.5×–3×)
 - Master brightness (0–255)
 
 ## Schedules (persisted)
 
 Each schedule has a name, a start (clock `HH:MM` **or** `sunset` ± offset
-minutes), a clock end time, active weekdays and/or specific calendar dates, and
-an enable toggle. Manual start/stop is always available and is not fought by the
-scheduler minute-to-minute.
+minutes), a clock end time, and an enable toggle. You choose *when* it applies
+with any combination of:
+
+- **Weekdays** (e.g. Fri/Sat)
+- **A date range** — *active from* / *active until* (inclusive). A range bounds
+  the chosen weekdays to that span (e.g. Fri/Sat *only June 1 – Aug 31*). A range
+  with no weekdays selected means every day in the span.
+- **Specific calendar dates** — one-off days (e.g. `2026-07-04`), always honored
+  regardless of the range.
+
+Manual start/stop is always available and is not fought by the scheduler
+minute-to-minute.
+
+All schedule and sunset math runs in the configured **timezone** (default
+`America/Denver` / Mountain), set in the Settings panel and independent of the
+host clock. The image bundles `tzdata`, so timezones resolve correctly even on
+the slim base image.
 
 ## Authentication
 

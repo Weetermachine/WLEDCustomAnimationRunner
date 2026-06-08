@@ -15,6 +15,7 @@ DEFAULT_SETTINGS = {
     "longitude": -111.8910,
     "speed": 1.0,            # animation speed multiplier (0.5 - 3.0)
     "master_brightness": 255,  # 0 - 255
+    "timezone": "America/Denver",  # IANA tz for schedules + sunset (Mountain)
 }
 
 
@@ -61,9 +62,17 @@ def init_db():
                 end_time      TEXT NOT NULL,                   -- 'HH:MM'
                 days          TEXT NOT NULL DEFAULT '[]',      -- JSON list of weekday ints (Mon=0)
                 dates         TEXT NOT NULL DEFAULT '[]',      -- JSON list of 'YYYY-MM-DD'
+                start_date    TEXT,                            -- 'YYYY-MM-DD' range start (inclusive)
+                end_date      TEXT,                            -- 'YYYY-MM-DD' range end (inclusive)
                 enabled       INTEGER NOT NULL DEFAULT 1
             )"""
         )
+        # Migrate older DBs that predate the date-range columns.
+        existing_cols = {r["name"] for r in c.execute("PRAGMA table_info(schedules)")}
+        if "start_date" not in existing_cols:
+            c.execute("ALTER TABLE schedules ADD COLUMN start_date TEXT")
+        if "end_date" not in existing_cols:
+            c.execute("ALTER TABLE schedules ADD COLUMN end_date TEXT")
         for k, v in DEFAULT_SETTINGS.items():
             c.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
@@ -183,6 +192,8 @@ def _row_to_schedule(r):
         "end_time": r["end_time"],
         "days": json.loads(r["days"]),
         "dates": json.loads(r["dates"]),
+        "start_date": r["start_date"],
+        "end_date": r["end_date"],
         "enabled": bool(r["enabled"]),
     }
 
@@ -208,8 +219,9 @@ def create_schedule(data):
         conn = get_conn()
         cur = conn.execute(
             """INSERT INTO schedules
-               (name, start_type, start_time, sunset_offset, end_time, days, dates, enabled)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (name, start_type, start_time, sunset_offset, end_time, days, dates,
+                start_date, end_date, enabled)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
                 data["start_type"],
@@ -218,6 +230,8 @@ def create_schedule(data):
                 data["end_time"],
                 json.dumps(data.get("days", [])),
                 json.dumps(data.get("dates", [])),
+                data.get("start_date") or None,
+                data.get("end_date") or None,
                 1 if data.get("enabled", True) else 0,
             ),
         )
@@ -237,7 +251,8 @@ def update_schedule(sched_id, data):
         conn.execute(
             """UPDATE schedules SET
                  name = ?, start_type = ?, start_time = ?, sunset_offset = ?,
-                 end_time = ?, days = ?, dates = ?, enabled = ?
+                 end_time = ?, days = ?, dates = ?, start_date = ?, end_date = ?,
+                 enabled = ?
                WHERE id = ?""",
             (
                 merged["name"],
@@ -247,6 +262,8 @@ def update_schedule(sched_id, data):
                 merged["end_time"],
                 json.dumps(merged.get("days", [])),
                 json.dumps(merged.get("dates", [])),
+                merged.get("start_date") or None,
+                merged.get("end_date") or None,
                 1 if merged.get("enabled", True) else 0,
                 sched_id,
             ),
