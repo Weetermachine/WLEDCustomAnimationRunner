@@ -39,9 +39,11 @@ class Animator:
         self.speed = 1.0
         self.master_brightness = 255
         self.animation_key = animations.default_key()
+        self.animation_params = {}   # {animation_key: {param_key: value}}
 
     # -- settings ----------------------------------------------------------
-    def update_settings(self, wled_ip=None, speed=None, master_brightness=None, animation=None):
+    def update_settings(self, wled_ip=None, speed=None, master_brightness=None,
+                        animation=None, animation_params=None):
         with self._lock:
             if wled_ip is not None:
                 self.wled_ip = wled_ip
@@ -51,6 +53,8 @@ class Animator:
                 self.master_brightness = max(0, min(255, int(master_brightness)))
             if animation is not None and animations.get(animation) is not None:
                 self.animation_key = animation
+            if animation_params is not None:
+                self.animation_params = dict(animation_params)
 
     def is_running(self):
         return self._running
@@ -117,6 +121,7 @@ class Animator:
                     ctx.brightness = self.master_brightness
                     ip = self.wled_ip
                     key = self.animation_key
+                    params_store = self.animation_params.get(key)
 
                 # (Re)resolve the animation when the selection changes.
                 if key != current_key:
@@ -124,6 +129,10 @@ class Animator:
                     current_key = key
                     frame = 0
                     gen = spec.fn(ctx) if spec and spec.kind == "generator" else None
+
+                # Refresh params every frame so color edits apply live.
+                if spec is not None:
+                    ctx.params = animations.merged_params(spec, params_store)
 
                 if spec is None:
                     buf = blank
@@ -147,6 +156,46 @@ class Animator:
         finally:
             sock.close()
             self._running = False
+
+
+def _downsample(buf, samples, n_leds):
+    """Pick `samples` evenly-spaced LEDs from a frame -> flat [r,g,b,...]."""
+    out = []
+    for s in range(samples):
+        i = (s * (n_leds - 1) // (samples - 1)) if samples > 1 else 0
+        o = i * 3
+        out.extend((buf[o], buf[o + 1], buf[o + 2]))
+    return out
+
+
+def render_preview(key, params=None, frames=60, samples=220, speed=1.0, brightness=255):
+    """Render an animation off-network into downsampled frames for the UI canvas.
+
+    Uses the exact same animation code the strip runs, so the preview never
+    drifts from reality.
+    """
+    spec = animations.get(key) or animations.get(animations.default_key())
+    if spec is None:
+        return {"samples": 0, "frames": []}
+
+    ctx = AnimationContext(NUM_LEDS, stripColors)
+    ctx.speed = max(0.5, min(3.0, float(speed)))
+    ctx.brightness = max(0, min(255, int(brightness)))
+    ctx.params = animations.merged_params(spec, params)
+
+    out = []
+    gen = spec.fn(ctx) if spec.kind == "generator" else None
+    for f in range(frames):
+        ctx.params = animations.merged_params(spec, params)
+        if spec.kind == "generator":
+            try:
+                buf = next(gen)
+            except StopIteration:
+                buf = bytes(NUM_LEDS * 3)
+        else:
+            buf = spec.fn(f, NUM_LEDS, ctx)
+        out.append(_downsample(buf, samples, NUM_LEDS))
+    return {"samples": samples, "frames": out}
 
 
 # single shared instance

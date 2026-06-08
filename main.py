@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 import animations
 import auth
 import database
-from animator import animator
+from animator import animator, render_preview
 from scheduler import ScheduleManager
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "christopher.weeter@gmail.com")
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     animator.update_settings(
         wled_ip=s["wled_ip"], speed=s["speed"],
         master_brightness=s["master_brightness"], animation=s.get("animation"),
+        animation_params=s.get("animation_params"),
     )
     schedule_manager.start()
     yield
@@ -141,6 +142,7 @@ class SettingsIn(BaseModel):
     master_brightness: Optional[int] = Field(default=None, ge=0, le=255)
     timezone: Optional[str] = None
     animation: Optional[str] = None
+    animation_params: Optional[dict] = None
 
 
 class ScheduleIn(BaseModel):
@@ -189,6 +191,25 @@ def get_animations():
     return animations.list_animations()
 
 
+class PreviewIn(BaseModel):
+    animation: str
+    params: dict = {}
+    speed: float = 1.0
+    brightness: int = 255
+    frames: int = 60
+    samples: int = 220
+
+
+@api.post("/api/preview")
+def preview(payload: PreviewIn):
+    frames = max(1, min(120, payload.frames))
+    samples = max(8, min(400, payload.samples))
+    return render_preview(
+        payload.animation, payload.params, frames, samples,
+        payload.speed, payload.brightness,
+    )
+
+
 @api.post("/api/settings")
 def set_settings(payload: SettingsIn):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -200,6 +221,7 @@ def set_settings(payload: SettingsIn):
     animator.update_settings(
         wled_ip=s["wled_ip"], speed=s["speed"],
         master_brightness=s["master_brightness"], animation=s.get("animation"),
+        animation_params=s.get("animation_params"),
     )
     return s
 

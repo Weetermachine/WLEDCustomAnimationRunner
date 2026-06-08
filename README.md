@@ -30,6 +30,37 @@ Ships with:
   smoothly even as speed changes.
 - **Rainbow Scroll** (`animations/rainbow.py`) — a moving hue gradient, written
   as a *stateless frame function*.
+- **Gradient Scroll** (`animations/gradient_scroll.py`) — a two-color scrolling
+  gradient with **color pickers** (defaults to Old Glory red/blue); shows the
+  parameter system.
+
+### Live preview
+
+The Settings panel shows a **canvas preview** of the selected animation, updating
+as you change its colors, speed, or brightness. Preview frames are rendered by
+the *actual Python animation code* (`/api/preview`, downsampled) and played back
+in the browser — so it never drifts from what the strip shows, and needs no
+hardware connected.
+
+### Parameters / color pickers
+
+An animation can declare configurable params that the UI renders as controls
+(currently `color`, `number`, `text`). Values are stored per-animation in the
+`animation_params` setting and arrive in `ctx.params`. Color values are hex
+strings; use the `hex_rgb` helper:
+
+```python
+from animations import animation, hex_rgb
+
+@animation("my_fx", "My Effect", params=[
+    {"key": "tint", "label": "Tint", "type": "color", "default": "#00aaff"},
+])
+def my_fx(frame, n_leds, ctx):
+    r, g, b = hex_rgb(ctx.params["tint"])
+    ...
+```
+
+Param edits apply live while the animation is running.
 
 ### Adding an animation
 

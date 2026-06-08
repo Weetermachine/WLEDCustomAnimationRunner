@@ -17,6 +17,7 @@ DEFAULT_SETTINGS = {
     "master_brightness": 255,  # 0 - 255
     "timezone": "America/Denver",  # IANA tz for schedules + sunset (Mountain)
     "animation": "flag_shimmer",  # key into the animations registry
+    "animation_params": {},       # {animation_key: {param_key: value}}
 }
 
 

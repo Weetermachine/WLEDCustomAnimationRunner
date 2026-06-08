@@ -194,6 +194,13 @@
         <input id="set-bright" type="range" min="0" max="255" step="1" />
       </label>
     </div>
+    <div id="anim-params" class="row" style="margin-top:14px; gap:18px"></div>
+    <div class="field" style="margin-top:14px">
+      <span>Live preview <span id="preview-label" class="muted"></span></span>
+      <canvas id="preview" width="220" height="34"
+        style="width:100%; height:46px; display:block; border-radius:8px;
+               border:1px solid var(--border); background:#000"></canvas>
+    </div>
     <div class="row" style="margin-top:16px">
       <button id="btn-save-settings" class="primary">Save settings</button>
     </div>
@@ -275,6 +282,8 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const DAY_NAMES = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+let ANIMS = [];                 // animation schema list from /api/animations
+let animationParams = {};       // { animation_key: { param_key: value } }
 
 async function api(path, opts) {
   const res = await fetch(path, {
@@ -319,21 +328,94 @@ $("#btn-stop").onclick  = async () => { await api("/api/stop",  { method: "POST"
 
 // ---- settings ----
 async function loadAnimations(selected) {
-  const list = await api("/api/animations");
+  ANIMS = await api("/api/animations");
   const sel = $("#set-animation");
   sel.innerHTML = "";
-  for (const a of list) {
+  for (const a of ANIMS) {
     const opt = document.createElement("option");
     opt.value = a.key;
     opt.textContent = a.label;
     sel.appendChild(opt);
   }
-  sel.value = selected || (list.find((a) => a.default) || list[0] || {}).key || "";
+  sel.value = selected || (ANIMS.find((a) => a.default) || ANIMS[0] || {}).key || "";
+  renderParams();
 }
+
+// Build color/number controls for the selected animation's params.
+function renderParams() {
+  const key = $("#set-animation").value;
+  const spec = ANIMS.find((a) => a.key === key) || {};
+  const params = spec.params || [];
+  const wrap = $("#anim-params");
+  wrap.innerHTML = "";
+  if (!params.length) {
+    wrap.innerHTML = '<span class="muted">No adjustable colors for this animation.</span>';
+    return;
+  }
+  animationParams[key] = animationParams[key] || {};
+  for (const p of params) {
+    const val = (key in animationParams && p.key in animationParams[key])
+      ? animationParams[key][p.key] : p.default;
+    animationParams[key][p.key] = val;
+    const lab = document.createElement("label");
+    lab.className = "field";
+    lab.style.display = "inline-grid";
+    lab.append(p.label);
+    const input = document.createElement("input");
+    input.type = p.type === "color" ? "color" : (p.type === "number" ? "number" : "text");
+    input.value = val;
+    input.oninput = () => { animationParams[key][p.key] = input.value; refreshPreview(); };
+    lab.appendChild(input);
+    wrap.appendChild(lab);
+  }
+}
+
+// ---- live preview (frames rendered by the real Python animation) ----
+let previewTimer = null, previewFrames = null, previewIdx = 0, previewDebounce = null;
+
+function stopPreview() {
+  if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+}
+function drawPreviewFrame(flat, samples) {
+  const cv = $("#preview"), c = cv.getContext("2d");
+  for (let s = 0; s < samples; s++) {
+    const o = s * 3;
+    c.fillStyle = `rgb(${flat[o]},${flat[o + 1]},${flat[o + 2]})`;
+    c.fillRect(s, 0, 1, cv.height);
+  }
+}
+function refreshPreview() {
+  clearTimeout(previewDebounce);
+  previewDebounce = setTimeout(async () => {
+    const key = $("#set-animation").value;
+    try {
+      const data = await api("/api/preview", { method: "POST", body: JSON.stringify({
+        animation: key,
+        params: animationParams[key] || {},
+        speed: parseFloat($("#set-speed").value),
+        brightness: parseInt($("#set-bright").value, 10),
+        frames: 60, samples: 220,
+      })});
+      stopPreview();
+      previewFrames = data.frames; previewIdx = 0;
+      $("#preview").width = data.samples;
+      $("#preview-label").textContent = "· " + ((ANIMS.find((a) => a.key === key) || {}).label || "");
+      if (!previewFrames.length) return;
+      previewTimer = setInterval(() => {
+        drawPreviewFrame(previewFrames[previewIdx], data.samples);
+        previewIdx = (previewIdx + 1) % previewFrames.length;
+      }, 1000 / 30);
+    } catch (e) { /* ignore preview errors */ }
+  }, 200);
+}
+
+$("#set-animation").onchange = () => { renderParams(); refreshPreview(); };
 
 async function loadSettings() {
   const s = await api("/api/settings");
+  animationParams = s.animation_params || {};
   await loadAnimations(s.animation);
+  refreshPreview();
   $("#set-ip").value = s.wled_ip;
   $("#set-lat").value = s.latitude;
   $("#set-lon").value = s.longitude;
@@ -343,11 +425,12 @@ async function loadSettings() {
   $("#set-bright").value = s.master_brightness;
   $("#bright-val").textContent = s.master_brightness;
 }
-$("#set-speed").oninput  = (e) => $("#speed-val").textContent = (+e.target.value).toFixed(1);
-$("#set-bright").oninput = (e) => $("#bright-val").textContent = e.target.value;
+$("#set-speed").oninput  = (e) => { $("#speed-val").textContent = (+e.target.value).toFixed(1); refreshPreview(); };
+$("#set-bright").oninput = (e) => { $("#bright-val").textContent = e.target.value; refreshPreview(); };
 $("#btn-save-settings").onclick = async () => {
   await api("/api/settings", { method: "POST", body: JSON.stringify({
     animation: $("#set-animation").value,
+    animation_params: animationParams,
     wled_ip: $("#set-ip").value.trim(),
     latitude: parseFloat($("#set-lat").value),
     longitude: parseFloat($("#set-lon").value),
@@ -486,6 +569,7 @@ let statusTimer = null;
 
 function showGate() {
   if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  stopPreview();
   $("#gate").style.display = "flex";
 }
 function hideGate() { $("#gate").style.display = "none"; }

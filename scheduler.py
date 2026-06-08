@@ -114,6 +114,7 @@ class ScheduleManager:
             speed=settings["speed"],
             master_brightness=settings["master_brightness"],
             animation=settings.get("animation"),
+            animation_params=settings.get("animation_params"),
         )
 
         now = datetime.datetime.now(tz).replace(microsecond=0)
